@@ -328,7 +328,7 @@ sudo usermod -aG docker $USER && newgrp docker
 **3. Enviar o projeto e configurar:**
 
 ```bash
-git clone https://github.com/SEU-USUARIO/traffic-analyzer.git   # ou scp/rsync da pasta
+git clone https://github.com/ricardoflnet/traffic-analyzer.git   # ou scp/rsync da pasta
 cd traffic-analyzer
 cp .env.example .env
 nano .env
