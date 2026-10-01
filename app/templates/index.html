@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Analisador de tráfego</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #EDF0F2; --panel: #F7F9FA; --ink: #17212B; --muted: #5B6873; --rule: #CBD3D9;
+    --tcp: #1F5FD1; --udp: #C7870A; --icmp: #138374; --arp: #7A4FC2; --other: #8A949C;
+    --danger: #B3261E; --focus: #1F5FD1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #121A21; --panel: #18222B; --ink: #E3E8EC; --muted: #93A0AA; --rule: #2C3944;
+      --tcp: #5A8DF0; --udp: #E3A52E; --icmp: #3BB39F; --arp: #A27FE0; --other: #6F7B85;
+      --danger: #F2827A; --focus: #8AB0F7;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font: 15px/1.5 "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-variant-numeric: tabular-nums;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 24px 20px 64px; }
+  header { display: flex; flex-wrap: wrap; gap: 16px 32px; align-items: end; justify-content: space-between; }
+  h1 { font-size: 26px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  h2 { font-size: 16px; font-weight: 600; margin: 0 0 12px; }
+  .status { color: var(--muted); margin: 4px 0 0; }
+  .status .live { color: var(--icmp); font-weight: 500; }
+  .status .live::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: currentColor; margin-right: 6px; vertical-align: 1px; animation: pulse 1.6s infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
+  @media (prefers-reduced-motion: reduce) { .status .live::before { animation: none; } }
+
+  form.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+  label { display: grid; gap: 2px; font-size: 13px; color: var(--muted); }
+  select, input, button {
+    font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 6px; padding: 7px 10px; min-height: 38px;
+  }
+  input { width: 180px; }
+  button { cursor: pointer; font-weight: 500; }
+  button.primary { background: var(--tcp); border-color: var(--tcp); color: #fff; }
+  button.stop { background: transparent; border-color: var(--danger); color: var(--danger); }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .error { color: var(--danger); min-height: 1.5em; margin: 8px 0 0; }
+
+  /* A fita: cada pacote é uma barra. É o único elemento "grande" da página. */
+  .tape { margin: 24px 0 8px; background: var(--panel); border: 1px solid var(--rule); border-radius: 8px;
+    padding: 14px 14px 10px; }
+  .tape-bars { display: flex; align-items: flex-end; justify-content: flex-end; gap: 2px; height: 140px; overflow: hidden; }
+  @media (max-width: 600px) { .tape-bars { gap: 1px; } }
+  .tape-bars span { flex: 1 1 0; min-width: 2px; border-radius: 1px 1px 0 0; }
+  .tape-foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-top: 8px;
+    font-size: 13px; color: var(--muted); }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  .empty { height: 140px; display: grid; place-items: center; color: var(--muted); text-align: center; }
+
+  .summary { display: flex; flex-wrap: wrap; gap: 8px 36px; margin: 20px 0 28px; }
+  .summary div { display: grid; }
+  .summary b { font-size: 22px; font-weight: 600; }
+  .summary small { color: var(--muted); font-size: 13px; }
+
+  .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  section.block { min-width: 0; }
+  .block-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .toggle { display: inline-flex; border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
+  .toggle button { border: 0; border-radius: 0; min-height: 28px; padding: 2px 10px; font-size: 13px; background: transparent; }
+  .toggle button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+
+  .rank-order { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-bottom: 12px;
+    color: var(--muted); font-size: 13px; }
+  .proto-row { display: grid; grid-template-columns: 88px 1fr auto; gap: 10px; align-items: center; margin-bottom: 8px; }
+  .proto-row .bar { height: 10px; border-radius: 2px; background: var(--rule); overflow: hidden; }
+  .proto-row .bar span { display: block; height: 100%; }
+  .proto-row small { color: var(--muted); }
+
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 6px 8px 6px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-weight: 500; color: var(--muted); font-size: 13px; }
+  td.num, th.num { text-align: right; padding-right: 0; }
+  td.ip { word-break: break-all; }
+  .scroll { overflow-x: auto; }
+  .recent { margin-top: 36px; }
+  #recent { min-width: 620px; }
+  #recent td.ip { word-break: normal; white-space: nowrap; }
+  .proto-tag { font-weight: 500; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Analisador de tráfego</h1>
+      <p class="status" id="status">Carregando…</p>
+    </div>
+    <form class="controls" id="controls">
+      <label>Interface de rede
+        <select id="iface" required></select>
+      </label>
+      <label>Filtro BPF (opcional)
+        <input id="filter" placeholder="ex.: tcp port 443" autocomplete="off">
+      </label>
+      <button class="primary" id="start" type="submit">Iniciar captura</button>
+      <button class="stop" id="stop" type="button" hidden>Parar captura</button>
+      <label>Sessão
+        <select id="session"></select>
+      </label>
+    </form>
+  </header>
+  <p class="error" id="error" role="alert"></p>
+
+  <div class="tape" aria-label="Últimos pacotes capturados">
+    <div class="tape-bars" id="tape"></div>
+    <div class="tape-foot">
+      <span>Últimos pacotes, do mais antigo ao mais recente. Altura proporcional ao tamanho.</span>
+      <span class="legend" id="legend"></span>
+    </div>
+  </div>
+
+  <div class="summary" id="summary"></div>
+
+  <div class="rank-order">
+    <span id="order-label">Rankings de IP ordenados por</span>
+    <span class="toggle" role="group" aria-labelledby="order-label">
+      <button type="button" data-order="bytes" aria-pressed="true">Bytes</button>
+      <button type="button" data-order="packets" aria-pressed="false">Pacotes</button>
+    </span>
+  </div>
+  <div class="grid">
+    <section class="block">
+      <h2>Pacotes por protocolo</h2>
+      <div id="protocols"></div>
+    </section>
+    <section class="block">
+      <div class="block-head"><h2>Top 5 IPs de origem</h2></div>
+      <div class="scroll"><table id="top-src"></table></div>
+    </section>
+    <section class="block">
+      <div class="block-head"><h2>Top 5 IPs de destino</h2></div>
+      <div class="scroll"><table id="top-dst"></table></div>
+    </section>
+  </div>
+
+  <section class="block recent">
+    <h2>Pacotes recentes</h2>
+    <div class="scroll"><table id="recent"></table></div>
+  </section>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const COLORS = { TCP: "--tcp", UDP: "--udp", ICMP: "--icmp", ICMPv6: "--icmp", ARP: "--arp" };
+const color = (p) => `var(${COLORS[p] || "--other"})`;
+const state = { order: "bytes", session: "", status: null };
+
+const fmtBytes = (n) => {
+  const u = ["B", "KB", "MB", "GB", "TB"]; let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return i ? `${n.toFixed(1)} ${u[i]}` : `${n} B`;
+};
+const fmtInt = (n) => Number(n || 0).toLocaleString("pt-BR");
+const fmtTime = (t) => t ? new Date(t * 1000).toLocaleTimeString("pt-BR") : "–";
+const fmtDuration = (s) => {
+  s = Math.max(0, Math.round(s)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), r = s % 60;
+  return h ? `${h}h ${m}min` : m ? `${m}min ${r}s` : `${r}s`;
+};
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) k === "style" ? node.style.cssText = v : node.setAttribute(k, v);
+  for (const c of children) node.append(c ?? "");
+  return node;
+}
+
+async function api(path, options = {}) {
+  const res = await fetch(path, { headers: { "Content-Type": "application/json" }, ...options });
+  const body = res.status === 204 ? null : await res.json().catch(() => null);
+  if (!res.ok) throw new Error(body?.error || `Erro ${res.status}`);
+  return body;
+}
+
+async function loadInterfaces() {
+  const list = await api("/api/interfaces");
+  $("iface").replaceChildren(...list.map((i) => el("option", { value: i }, i)));
+  const guess = list.find((i) => /^(eth|en|wl)/.test(i));
+  if (guess) $("iface").value = guess;
+}
+
+async function loadSessions() {
+  const list = await api("/api/sessions");
+  const opts = [el("option", { value: "" }, "Mais recente")];
+  for (const s of list) {
+    opts.push(el("option", { value: s.id },
+      `#${s.id} ${s.interface}, ${new Date(s.started_at * 1000).toLocaleString("pt-BR")} (${fmtInt(s.packets)} pct)`));
+  }
+  $("session").replaceChildren(...opts);
+  $("session").value = state.session;
+}
+
+function renderStatus(st) {
+  state.status = st;
+  $("start").hidden = st.running; $("stop").hidden = !st.running;
+  $("iface").disabled = $("filter").disabled = st.running;
+  const s = $("status");
+  if (st.running) {
+    s.replaceChildren(el("span", { class: "live" }, `Capturando em ${st.interface}`),
+      ` há ${fmtDuration(Date.now() / 1000 - st.started_at)}`,
+      st.bpf_filter ? `, filtro “${st.bpf_filter}”` : "",
+      st.dropped ? `. ${fmtInt(st.dropped)} pacotes descartados (fila cheia).` : "");
+  } else {
+    s.textContent = "Nenhuma captura em andamento. Escolha a interface e inicie.";
+  }
+}
+
+function renderTape(packets) {
+  const tape = $("tape");
+  if (!packets.length) {
+    tape.replaceChildren(el("div", { class: "empty", style: "flex:1" },
+      "Os pacotes aparecem aqui assim que a captura começar."));
+    return;
+  }
+  const bars = packets.slice().reverse().map((p) => {
+    const h = Math.max(4, Math.min(100, (p.length / 1514) * 100));
+    return el("span", { style: `height:${h}%;background:${color(p.protocol)}`,
+      title: `${p.protocol} ${p.src_ip || "?"} → ${p.dst_ip || "?"} (${p.length} B)` });
+  });
+  tape.replaceChildren(...bars);
+}
+
+function renderSummary(s) {
+  const span = s.first_at && s.last_at ? s.last_at - s.first_at : 0;
+  const items = [
+    [fmtInt(s.total_packets), "pacotes capturados"],
+    [fmtBytes(s.total_bytes), "volume total"],
+    [span ? `${fmtBytes(s.total_bytes / span)}/s` : "–", "taxa média"],
+    [fmtInt(s.protocols.length), "protocolos distintos"],
+  ];
+  $("summary").replaceChildren(...items.map(([v, l]) => el("div", {}, el("b", {}, v), el("small", {}, l))));
+}
+
+function renderProtocols(s) {
+  const max = Math.max(1, ...s.protocols.map((p) => p.packets));
+  const rows = s.protocols.map((p) => el("div", { class: "proto-row" },
+    el("span", { class: "proto-tag", style: `color:${color(p.protocol)}` }, p.protocol),
+    el("div", { class: "bar" }, el("span", { style: `width:${p.packets / max * 100}%;background:${color(p.protocol)}` })),
+    el("small", {}, `${fmtInt(p.packets)} (${(p.packets / s.total_packets * 100).toFixed(1)}%)`)));
+  $("protocols").replaceChildren(...(rows.length ? rows : [el("p", { class: "status" }, "Sem dados nesta sessão.")]));
+  const seen = [...new Set(s.protocols.map((p) => p.protocol))];
+  $("legend").replaceChildren(...seen.map((p) => el("span", {}, el("i", { style: `background:${color(p)}` }), p)));
+}
+
+function renderTop(id, rows) {
+  const head = el("tr", {}, el("th", {}, "Endereço IP"), el("th", { class: "num" }, "Pacotes"), el("th", { class: "num" }, "Bytes"));
+  const body = rows.map((r) => el("tr", {}, el("td", { class: "ip" }, r.ip),
+    el("td", { class: "num" }, fmtInt(r.packets)), el("td", { class: "num" }, fmtBytes(r.bytes))));
+  if (!body.length) body.push(el("tr", {}, el("td", { colspan: 3, class: "status" }, "Sem dados.")));
+  $(id).replaceChildren(el("thead", {}, head), el("tbody", {}, ...body));
+}
+
+function renderRecent(packets) {
+  const head = el("tr", {}, ...["Hora", "Origem", "Destino", "Protocolo"].map((h) => el("th", {}, h)),
+    el("th", { class: "num" }, "Tamanho"));
+  const body = packets.slice(0, 25).map((p) => el("tr", {},
+    el("td", {}, fmtTime(p.captured_at)), el("td", { class: "ip" }, p.src_ip || "–"),
+    el("td", { class: "ip" }, p.dst_ip || "–"),
+    el("td", { class: "proto-tag", style: `color:${color(p.protocol)}` }, p.protocol),
+    el("td", { class: "num" }, `${fmtInt(p.length)} B`)));
+  $("recent").replaceChildren(el("thead", {}, head), el("tbody", {}, ...body));
+}
+
+async function refresh() {
+  try {
+    const q = state.session ? `session_id=${state.session}&` : "";
+    const [st, stats, packets] = await Promise.all([
+      api("/api/status"), api(`/api/stats?${q}order=${state.order}`), api(`/api/packets?${q}limit=150`),
+    ]);
+    renderStatus(st);
+    renderTape(packets);
+    const s = stats || { total_packets: 0, total_bytes: 0, protocols: [], top_sources: [], top_destinations: [] };
+    renderSummary(s); renderProtocols(s);
+    renderTop("top-src", s.top_sources); renderTop("top-dst", s.top_destinations);
+    renderRecent(packets);
+  } catch (e) { $("error").textContent = e.message; }
+}
+
+$("controls").addEventListener("submit", async (ev) => {
+  ev.preventDefault(); $("error").textContent = "";
+  try {
+    await api("/api/capture/start", { method: "POST",
+      body: JSON.stringify({ interface: $("iface").value, filter: $("filter").value }) });
+    state.session = ""; await loadSessions(); refresh();
+  } catch (e) { $("error").textContent = e.message; }
+});
+$("stop").addEventListener("click", async () => {
+  try { await api("/api/capture/stop", { method: "POST" }); await loadSessions(); refresh(); }
+  catch (e) { $("error").textContent = e.message; }
+});
+$("session").addEventListener("change", (ev) => { state.session = ev.target.value; refresh(); });
+document.querySelectorAll(".toggle button").forEach((b) => b.addEventListener("click", () => {
+  state.order = b.dataset.order;
+  document.querySelectorAll(".toggle button").forEach((x) => x.setAttribute("aria-pressed", x === b));
+  refresh();
+}));
+
+(async () => {
+  try { await loadInterfaces(); await loadSessions(); } catch (e) { $("error").textContent = e.message; }
+  refresh();
+  setInterval(refresh, 2000);
+  setInterval(() => { if (!state.status?.running) return; loadSessions(); }, 10000);
+})();
+</script>
+</body>
+</html>

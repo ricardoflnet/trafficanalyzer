@@ -1,0 +1,30 @@
+services:
+  traffic-analyzer:
+    build:
+      context: .
+      args:
+        INSTALL_DEV: "${INSTALL_DEV:-false}"
+    image: traffic-analyzer:latest
+    container_name: traffic-analyzer
+    # Rede do host: o container enxerga as interfaces reais da máquina
+    # (eth0, ens3, wlan0...), e não apenas a interface virtual do Docker.
+    network_mode: host
+    # Permissões mínimas para abrir sockets de captura (sem --privileged).
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    environment:
+      APP_USER: "${APP_USER:-admin}"
+      APP_PASSWORD: "${APP_PASSWORD:-}"
+      BIND_ADDRESS: "${BIND_ADDRESS:-0.0.0.0:8000}"
+      CAPTURE_INTERFACE: "${CAPTURE_INTERFACE:-}"
+      CAPTURE_FILTER: "${CAPTURE_FILTER:-}"
+      BATCH_SIZE: "${BATCH_SIZE:-500}"
+      FLUSH_INTERVAL: "${FLUSH_INTERVAL:-1.0}"
+      LOG_LEVEL: "${LOG_LEVEL:-INFO}"
+    volumes:
+      - traffic-data:/data
+    restart: unless-stopped
+
+volumes:
+  traffic-data:
